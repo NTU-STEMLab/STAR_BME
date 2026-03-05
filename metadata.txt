@@ -1,0 +1,89 @@
+[general]
+name=STAR BME
+qgisMinimumVersion=3.16
+qgisMaximumVersion=3.99
+description=A plugin for modern spatiotemporal modelling and mapping using Bayesian Maximum Entropy
+about=STAR-BME (Space Time Analysis of Regional data using Bayesian Maximum Entropy)
+    is a QGIS plugin for spatiotemporal modelling and mapping. It provides
+    advanced geostatistical analysis tools including BME estimation, cross-validation,
+    covariance modeling, and support for both hard (exact) and soft (uncertain) data.
+    STAR-BME implements the BME framework for optimal data integration and prediction
+    across space and time, with parallel processing support for large datasets.
+version=1.0.0
+author=STEMLab
+email=hlyu@ntu.edu.tw
+
+tags=spatiotemporal, geostatistics, BME, kriging, modeling, mapping, interpolation, bayesian, covariance
+homepage=
+tracker=
+repository=
+category=Plugins
+icon=image/stemlab.png
+experimental=False
+deprecated=False
+hasProcessingProvider=no
+server=False
+
+changelog=
+    1.0.0 - Major release: Full Python 3 / PyQt5 / QGIS 3 migration (2026-02-26)
+        * Migrated entire codebase from Python 2 / PyQt4 / QGIS 2 to
+          Python 3.12 / PyQt5 / QGIS 3.44.
+        Cross-Validation:
+        * Fixed a critical multiprocessing deadlock in the cross-validation
+          module by migrating from ProcessPoolExecutor to a thread-based
+          executor (ThreadPoolExecutor), resolving macOS-specific issues
+          with multiprocessing.spawn inside the QGIS application bundle.
+        * Resolved GUI freezing issues during cross-validation, ensuring
+          the progress bar now updates correctly during heavy background
+          tasks with elapsed-time status messages.
+        * Replaced the slow cubature-based integration path (BMEprobaMoments)
+          in cross-validation workers with the faster QMC-based engine
+          (BMEPosteriorMoments), dramatically improving performance.
+        * Fixed IndexError when all cross-validation results are NaN;
+          the plugin now returns NaN statistics gracefully instead of
+          crashing.
+        * Clarified cross-validation result labels to explicitly indicate
+          error statistics (e.g. "Mean error", "Std. dev. of error").
+        * Added valid-sample count to cross-validation result summary.
+        BME Estimation:
+        * Improved numerical stability in BME soft data processing with
+          QMC domain clipping, PSD enforcement, Importance Sampling,
+          automatic Gaussian approximation fallback, and robust SVD.
+        * Fixed NaN propagation bugs when estimation points are near
+          soft data locations.
+        * Added non-negativity constraint support (zero-clamping) for
+          datasets with strictly non-negative values.
+        * Implemented parallel prediction via ThreadPoolExecutor with
+          BLAS/LAPACK thread limiting for optimal throughput.
+        GUI and Display:
+        * Fixed rendering errors related to the spatial distribution of
+          variance display caused by incorrect layer visibility toggling
+          (copy-paste bug referencing wrong raster layer).
+        * Added try/finally cleanup to the time bar draw method to prevent
+          frozen progress dialogs and canvas lockups on errors.
+        * Guarded all findLayer() calls against NoneType returns to
+          prevent AttributeError crashes.
+        * Fixed colorbar crash when viewing soft-only cross-validation
+          spatial results (stale dialog reuse).
+        * Fixed dynamic colorbar labels to reflect the selected metric
+          instead of a hardcoded "Root mean square error" label.
+        * Fixed matplotlib 3.x compatibility for artist deletion and
+          3D plot initialization.
+        QGIS 3 API Modernization:
+        * Replaced QgsMapLayerRegistry with QgsProject.instance().
+        * Updated QgsCoordinateReferenceSystem to use toProj() and
+          createFromProj() instead of deprecated Proj4 methods.
+        * Updated QgsVectorFileWriter to writeAsVectorFormatV3().
+        * Updated QgsGraduatedSymbolRenderer to use
+          setClassificationMethod().
+        * Fixed QgsField constructor for QGIS 3 compatibility.
+        * Ensured layer tree node visibility and canvas refresh after
+          data import.
+        Python 3.12 Compatibility:
+        * Replaced all imp module usage with importlib.
+        * Fixed integer division, removed long type, updated print
+          statements to function calls.
+        * Replaced deprecated numpy.asscalar with .item().
+        * Fixed numpy boolean array indexing assignment issues.
+        * Replaced deprecated np.int and np.float with built-in types.
+    0.6.0 - Updated for QGIS 3 compatibility.
