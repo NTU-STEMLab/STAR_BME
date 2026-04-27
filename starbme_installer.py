@@ -33,9 +33,21 @@ class DependencyInstaller:
         return len(self.missing_packages) == 0
     
     def _is_package_available(self, package_name):
-        """Check if a package is importable"""
-        spec = importlib.util.find_spec(package_name)
-        return spec is not None
+        """
+        Check if a package can actually be imported (not just found on disk).
+        find_spec alone is insufficient: on macOS ARM64 a package can exist on
+        disk but fail to load due to architecture mismatches in compiled
+        extensions (e.g., dlopen libgcc_s.1.1.dylib architecture error).
+        """
+        try:
+            importlib.import_module(package_name)
+            return True
+        except ImportError:
+            return False
+        except Exception as e:
+            # Catches OSError / architecture errors (e.g., dlopen failure on ARM64)
+            print(f"[STAR_BME DEBUG] {package_name} found but failed to load: {e}")
+            return False
     
     def get_missing_packages_message(self):
         """Get user-friendly message about missing packages"""
@@ -52,108 +64,104 @@ class DependencyInstaller:
     
     def _find_python_executable(self):
         """
-        Find the correct Python executable for QGIS.
-        
+        Find the correct Python executable for QGIS on Windows, macOS, and Linux.
+
         Strategy:
-        A. Use sys.prefix to construct path to python3 binary
-        B. If that fails, recursively search QGIS.app bundle
-        C. If all fails, log debug info and return sys.executable
-        
+        1. Check sys.prefix using platform-appropriate binary name/location
+        2. Check sys.base_prefix (handles venv / embedded scenarios)
+        3. macOS only: walk the QGIS.app bundle as a last resort
+        4. Fall back to sys.executable
+
         Returns:
             str: Path to Python executable
         """
         import os
-        import stat
-        
+        import platform
+
+        system = platform.system()  # 'Windows', 'Darwin', 'Linux'
         exe = sys.executable
-        
-        # Debug logging
+
+        print(f"[STAR_BME DEBUG] Platform: {system}")
         print(f"[STAR_BME DEBUG] sys.executable = {exe}")
         print(f"[STAR_BME DEBUG] sys.prefix = {sys.prefix}")
         print(f"[STAR_BME DEBUG] sys.base_prefix = {getattr(sys, 'base_prefix', 'N/A')}")
-        
+
         def is_valid_python(path):
-            """Check if path is a valid, executable Python binary"""
-            if not os.path.exists(path):
+            """Check if path is a valid, executable Python binary."""
+            if not path or not os.path.exists(path) or not os.path.isfile(path):
                 return False
-            if not os.path.isfile(path):
-                return False
-            # Check if executable
             try:
                 return os.access(path, os.X_OK)
-            except:
+            except Exception:
                 return False
-        
-        # ========================================
-        # STRATEGY A: Use sys.prefix
-        # ========================================
-        # Python is typically at {sys.prefix}/bin/python3
-        prefix_python = os.path.join(sys.prefix, 'bin', 'python3')
-        print(f"[STAR_BME DEBUG] Strategy A: Trying {prefix_python}")
-        
-        if is_valid_python(prefix_python):
-            print(f"[STAR_BME DEBUG] ✅ Found via sys.prefix: {prefix_python}")
-            return prefix_python
-        
-        # Also try base_prefix (for venv scenarios)
-        if hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix:
-            base_prefix_python = os.path.join(sys.base_prefix, 'bin', 'python3')
-            print(f"[STAR_BME DEBUG] Strategy A.2: Trying {base_prefix_python}")
-            if is_valid_python(base_prefix_python):
-                print(f"[STAR_BME DEBUG] ✅ Found via sys.base_prefix: {base_prefix_python}")
-                return base_prefix_python
-        
-        # ========================================
-        # STRATEGY B: Recursive Search (Nuclear Option)
-        # ========================================
-        print(f"[STAR_BME DEBUG] Strategy A failed. Starting recursive search...")
-        
-        # Find QGIS.app root
-        qgis_app_root = None
-        if 'QGIS.app' in exe or 'QGIS.app' in sys.prefix:
-            # Extract path to .app bundle
-            for path_component in [exe, sys.prefix]:
+
+        def search_prefix(prefix):
+            """
+            Return the Python binary under a given prefix, using the
+            platform-appropriate path convention:
+              Windows  → {prefix}\\python3.exe  or  {prefix}\\python.exe
+              macOS/Linux → {prefix}/bin/python3  or  {prefix}/bin/python
+            """
+            if system == 'Windows':
+                for name in ['python3.exe', 'python.exe']:
+                    candidate = os.path.join(prefix, name)
+                    if is_valid_python(candidate):
+                        return candidate
+            else:
+                for name in ['python3', 'python']:
+                    candidate = os.path.join(prefix, 'bin', name)
+                    if is_valid_python(candidate):
+                        return candidate
+            return None
+
+        # --- Step 1: sys.prefix (the active Python environment) ---
+        found = search_prefix(sys.prefix)
+        if found:
+            print(f"[STAR_BME DEBUG] ✅ Found via sys.prefix: {found}")
+            return found
+
+        # --- Step 2: sys.base_prefix (handles venv / embedded scenarios) ---
+        base = getattr(sys, 'base_prefix', sys.prefix)
+        if base != sys.prefix:
+            found = search_prefix(base)
+            if found:
+                print(f"[STAR_BME DEBUG] ✅ Found via sys.base_prefix: {found}")
+                return found
+
+        # --- Step 3 (macOS only): walk the QGIS.app bundle ---
+        if system == 'Darwin':
+            qgis_app_root = None
+            for path_component in [sys.prefix, exe]:
                 if 'QGIS.app' in path_component:
-                    app_idx = path_component.find('QGIS.app')
-                    qgis_app_root = path_component[:app_idx + len('QGIS.app')]
+                    idx = path_component.find('QGIS.app')
+                    qgis_app_root = path_component[:idx + len('QGIS.app')]
                     break
-        
-        if qgis_app_root and os.path.exists(qgis_app_root):
-            print(f"[STAR_BME DEBUG] Strategy B: Searching inside {qgis_app_root}")
-            
-            # Walk through the bundle looking for python3 in bin/ folders
-            found_pythons = []
-            for root, dirs, files in os.walk(qgis_app_root):
-                # Skip certain directories to speed up search
-                if any(skip in root for skip in ['.git', '__pycache__', 'site-packages']):
-                    continue
-                
-                if 'python3' in files:
-                    python_path = os.path.join(root, 'python3')
-                    if is_valid_python(python_path):
-                        found_pythons.append(python_path)
-                        print(f"[STAR_BME DEBUG] Found candidate: {python_path}")
-                        
-                        # Prefer python3 in a 'bin' directory
-                        if 'bin' in root:
-                            print(f"[STAR_BME DEBUG] ✅ Found via recursive search: {python_path}")
-                            return python_path
-            
-            # If we found any python3, return the first one
-            if found_pythons:
-                print(f"[STAR_BME DEBUG] ✅ Using first found: {found_pythons[0]}")
-                return found_pythons[0]
-        
-        # ========================================
-        # STRATEGY C: Use sys.executable directly
-        # ========================================
-        # On some systems, sys.executable works with -m pip even if it's
-        # not a direct Python binary (e.g., QGIS might have a wrapper)
-        print(f"[STAR_BME DEBUG] Strategies A & B failed.")
-        print(f"[STAR_BME DEBUG] Trying sys.executable directly: {exe}")
-        print(f"[STAR_BME DEBUG] (This may work if QGIS has a Python wrapper)")
-        
+            if qgis_app_root and os.path.exists(qgis_app_root):
+                print(f"[STAR_BME DEBUG] Searching QGIS.app bundle: {qgis_app_root}")
+                for root, dirs, files in os.walk(qgis_app_root):
+                    if any(s in root for s in ['.git', '__pycache__', 'site-packages']):
+                        continue
+                    for name in ['python3', 'python']:
+                        if name in files:
+                            candidate = os.path.join(root, name)
+                            if is_valid_python(candidate) and 'bin' in root:
+                                print(f"[STAR_BME DEBUG] ✅ Found in bundle: {candidate}")
+                                return candidate
+
+        # --- Step 4: sys.executable as last resort ---
+        print(f"[STAR_BME DEBUG] Falling back to sys.executable: {exe}")
         return exe
+
+    def _manual_install_hint(self):
+        """
+        Return the correct python_exe assignment for the current platform,
+        to be shown in user-facing error messages.
+        """
+        import platform
+        if platform.system() == 'Windows':
+            return r'python_exe = os.path.join(sys.prefix, "python3.exe")'
+        else:
+            return 'python_exe = os.path.join(sys.prefix, "bin", "python3")'
     
     def install_dependencies(self):
         """Install missing dependencies using pip"""
@@ -228,8 +236,8 @@ class DependencyInstaller:
         msg += "1. Open QGIS Python Console (Ctrl+Alt+P or Cmd+Alt+P)\n"
         msg += "2. Run these commands:\n"
         msg += "   import subprocess, sys, os\n"
-        msg += f"   python_exe = os.path.join(sys.prefix, 'bin', 'python3')\n"
-        msg += "   print(f'Using Python: {{python_exe}}')\n"
+        msg += f"   {self._manual_install_hint()}\n"
+        msg += "   print(f'Using Python: {python_exe}')\n"
         for package in self.missing_packages:
             msg += f"   subprocess.run([python_exe, '-m', 'pip', 'install', '--user', '{package}'])\n"
         msg += "\n3. Restart QGIS\n"
@@ -268,6 +276,7 @@ def ensure_dependencies(iface=None):
         )
         
         if reply == QMessageBox.No:
+            python_hint = installer._manual_install_hint()
             QMessageBox.information(
                 iface.mainWindow(),
                 "STAR-BME: Installation Cancelled",
@@ -276,7 +285,7 @@ def ensure_dependencies(iface=None):
                 "1. Open QGIS Python Console (Ctrl+Alt+P or Cmd+Alt+P)\n"
                 "2. Run:\n"
                 "   import subprocess, sys, os\n"
-                "   python_exe = os.path.join(sys.prefix, 'bin', 'python3')\n"
+                f"   {python_hint}\n"
                 "   subprocess.run([python_exe, '-m', 'pip', 'install', '--user', 'pandas', 'scipy', 'numpy', 'matplotlib'])\n"
                 "3. Restart QGIS"
             )
