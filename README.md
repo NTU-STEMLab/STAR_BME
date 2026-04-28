@@ -93,7 +93,7 @@ Optional (for advanced statistical features):
 
 ### Method 1: Manual Installation from ZIP (Recommended)
 
-1. Download `STAR_BME.zip` from the [Releases page](../../releases) or from the [official website](https://stemlab.bse.ntu.edu.tw/blog/2019-04-23-star-bme/).
+1. Download `STAR_BME.zip` from the [Releases page](../../releases).
 
    > **Do not use the green "Code → Download ZIP" button on GitHub.** GitHub appends `-main` to the folder name inside that zip, which breaks the plugin. Always download from the **Releases** page.
 
