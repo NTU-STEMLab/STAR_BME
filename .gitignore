@@ -1,9 +1,12 @@
 # Cursor IDE files
 .cursorindexingignore
+
 # AI session history
 .specstory/
+
 # Python cache
 __pycache__/
 **/__pycache__/
+
 # Distribution zips (use GitHub Releases instead)
 *.zip
